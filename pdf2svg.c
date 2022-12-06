@@ -89,6 +89,25 @@ int main(int argn, char *args[])
 	// Initialise the GType library
 	g_type_init ();
 
+	// Command line options
+	GOptionContext *context;
+	GError *err = NULL;
+	static gint firstPage = 0;
+	static gint lastPage = 0;
+	GOptionEntry entries[] = {
+		{ "first", 'f', 0, G_OPTION_ARG_INT, &firstPage, "First page", "<int>" },
+		{ "last", 'l', 0, G_OPTION_ARG_INT, &lastPage, "Last page", "<int>" },
+		{ NULL }
+	};
+	context = g_option_context_new("<in file.pdf> <out file.svg> [<page no>]");
+	g_option_context_add_main_entries(context, entries, NULL);
+	if (!g_option_context_parse(context, &argn, &args, &err)) {
+		g_print("option parsing failed: %s\n", err->message);
+		g_error_free(err);
+		return -6;
+	}
+	g_option_context_free(context);
+
 	// Get command line arguments
 	if ((argn < 3)||(argn > 4)) {
 		printf("Usage: pdf2svg <in file.pdf> <out file.svg> [<page no>]\n");
@@ -117,26 +136,36 @@ int main(int argn, char *args[])
 	int conversionErrors = 0;
 	// Get the page
 
-	if(pageLabel == NULL) {
+	if(pageLabel == NULL && firstPage == 0 && lastPage == 0) {
 		page = poppler_document_get_page(pdffile, 0);
 		conversionErrors = convertPage(page, svgFilename);
 	}
 	else {
-		if(strcmp(pageLabel, "all") == 0) {
+		if(pageLabel == NULL || strcmp(pageLabel, "all") == 0) {
 			int curError;
 			int pageCount = poppler_document_get_n_pages(pdffile);
 
-			if(pageCount > 9999999) {
+			if (firstPage <= 0) {
+				firstPage = 1;
+			}
+			if (lastPage <= 0) {
+				lastPage = pageCount;
+			}
+			if (lastPage > pageCount || firstPage > lastPage) {
+				fprintf(stderr, "Invalid argument\n");
+				return -7;
+			}
+			if ((lastPage - firstPage + 1) > 9999999) {
 				fprintf(stderr, "Too many pages (>9,999,999)\n");
 				return -5;
 			}
 
-			size_t svgFilenameBufLen = strlen(svgFilename) + 1;
+			size_t svgFilenameBufLen = strlen(svgFilename) + 16;
 			char *svgFilenameBuffer = (char*)malloc(svgFilenameBufLen);
 			assert(svgFilenameBuffer != NULL);
 
 			int pageInd;
-			for(pageInd = 0; pageInd < pageCount; pageInd++) {
+			for(pageInd = firstPage - 1; pageInd < lastPage; pageInd++) {
 				while (1) {
 					size_t _wr_len = snprintf(svgFilenameBuffer, svgFilenameBufLen, svgFilename, pageInd + 1);
 					if (_wr_len >= svgFilenameBufLen) {
@@ -154,6 +183,9 @@ int main(int argn, char *args[])
 					conversionErrors = -1;
 			}
 			free(svgFilenameBuffer);
+			if (pageLabel != NULL) {
+				g_free(pageLabel);
+			}
 		}
 		else {
 			page = poppler_document_get_page_by_label(pdffile, pageLabel);
